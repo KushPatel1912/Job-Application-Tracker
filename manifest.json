@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Job Tracker",
+  "description": "Automatically logs your job applications to a Google Sheet.",
+  "version": "0.1.0",
+  "permissions": [
+    "storage",
+    "identity",
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://*.googleapis.com/*",
+    "https://www.googleapis.com/*",
+    "https://accounts.google.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.ts",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "Job Tracker"
+  },
+  "options_ui": {
+    "page": "src/options/index.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/contentScript.ts"],
+      "run_at": "document_idle"
+    }
+  ]
+}
