@@ -6,14 +6,14 @@
     "isEntry": true
   },
   "_tailwind-!~{007}~.js": {
-    "file": "assets/tailwind-DCiZP7Qh.css",
+    "file": "assets/tailwind-ByQ1L0WE.css",
     "src": "_tailwind-!~{007}~.js"
   },
-  "_tailwind-CDWFWxRD.js": {
-    "file": "assets/tailwind-CDWFWxRD.js",
+  "_tailwind-Dl9gRVam.js": {
+    "file": "assets/tailwind-Dl9gRVam.js",
     "name": "tailwind",
     "css": [
-      "assets/tailwind-DCiZP7Qh.css"
+      "assets/tailwind-ByQ1L0WE.css"
     ]
   },
   "_types-nBKLuWuN.js": {
@@ -21,7 +21,7 @@
     "name": "types"
   },
   "src/background.ts": {
-    "file": "assets/background.ts-DEOjV76d.js",
+    "file": "assets/background.ts-CZzFjqDd.js",
     "name": "background.ts",
     "src": "src/background.ts",
     "isEntry": true,
@@ -30,28 +30,28 @@
     ]
   },
   "src/contentScript.ts": {
-    "file": "assets/contentScript.ts-BRusHiKb.js",
+    "file": "assets/contentScript.ts-BzX_odAH.js",
     "name": "contentScript.ts",
     "src": "src/contentScript.ts",
     "isEntry": true
   },
   "src/options/index.html": {
-    "file": "assets/index.html-Djhe6dcd.js",
+    "file": "assets/index.html-CziXCNWP.js",
     "name": "index.html",
     "src": "src/options/index.html",
     "isEntry": true,
     "imports": [
-      "_tailwind-CDWFWxRD.js",
+      "_tailwind-Dl9gRVam.js",
       "_types-nBKLuWuN.js"
     ]
   },
   "src/popup/index.html": {
-    "file": "assets/index.html-Czre-1zW.js",
+    "file": "assets/index.html-CI1uhcFA.js",
     "name": "index.html",
     "src": "src/popup/index.html",
     "isEntry": true,
     "imports": [
-      "_tailwind-CDWFWxRD.js",
+      "_tailwind-Dl9gRVam.js",
       "_types-nBKLuWuN.js"
     ]
   }

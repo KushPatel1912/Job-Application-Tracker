@@ -1,5 +1,10 @@
 const JT_DEBOUNCE_MS = 8e3;
+const AUTO_SAVE_INTERVAL = 3e3;
 let jtLastSubmitAt = 0;
+let hasUnsavedChanges = false;
+let autoSaveInterval = null;
+let isSubmitting = false;
+const boundForms = /* @__PURE__ */ new WeakSet();
 function normalizedText(node) {
   return (node?.innerText || node?.textContent || "").trim();
 }
@@ -18,6 +23,118 @@ function getInputValue(el) {
     return sel.options?.[sel.selectedIndex]?.text || sel.value || "";
   }
   return el.value || "";
+}
+function generateFormId(form) {
+  if (form.id) return form.id;
+  if (form.action) return form.action.split("/").pop() || "unknown";
+  return `form_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+}
+function saveFormData(form) {
+  try {
+    const formId = generateFormId(form);
+    const formData = new FormData(form);
+    const data = {};
+    for (const [key, value] of formData.entries()) {
+      data[key] = value;
+    }
+    const formState = {
+      formId,
+      timestamp: Date.now(),
+      data
+    };
+    localStorage.setItem(`jt_form_${formId}`, JSON.stringify(formState));
+    hasUnsavedChanges = true;
+  } catch (error) {
+    console.warn("Job Tracker: Failed to save form data:", error);
+  }
+}
+function restoreFormData(form) {
+  try {
+    const formId = generateFormId(form);
+    const saved = localStorage.getItem(`jt_form_${formId}`);
+    if (saved) {
+      const formState = JSON.parse(saved);
+      const { data } = formState;
+      Object.entries(data).forEach(([key, value]) => {
+        const field = form.querySelector(`[name="${key}"]`);
+        if (field) {
+          if (field.type === "checkbox") {
+            field.checked = value === "Yes" || value === true;
+          } else if (field.tagName === "SELECT") {
+            field.value = value;
+          } else {
+            field.value = value;
+          }
+        }
+      });
+      hasUnsavedChanges = true;
+      console.log("Job Tracker: Form data restored from localStorage");
+    }
+  } catch (error) {
+    console.warn("Job Tracker: Failed to restore form data:", error);
+  }
+}
+function clearFormData(form) {
+  try {
+    const formId = generateFormId(form);
+    localStorage.removeItem(`jt_form_${formId}`);
+    hasUnsavedChanges = false;
+  } catch (error) {
+    console.warn("Job Tracker: Failed to clear form data:", error);
+  }
+}
+function startAutoSave(form) {
+  if (autoSaveInterval) {
+    clearInterval(autoSaveInterval);
+  }
+  autoSaveInterval = setInterval(() => {
+    if (hasUnsavedChanges && !isSubmitting) {
+      saveFormData(form);
+    }
+  }, AUTO_SAVE_INTERVAL);
+}
+function stopAutoSave() {
+  if (autoSaveInterval) {
+    clearInterval(autoSaveInterval);
+    autoSaveInterval = null;
+  }
+}
+function addLoadingState(form) {
+  const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    const originalText = submitBtn.value || submitBtn.textContent || "Submit";
+    submitBtn.setAttribute("data-original-text", originalText);
+    submitBtn.value = submitBtn.textContent = "Submitting...";
+    if (submitBtn.tagName === "BUTTON") {
+      submitBtn.innerHTML = '<span class="loading-spinner">⏳</span> Submitting...';
+    }
+  }
+}
+function removeLoadingState(form) {
+  const submitBtn = form.querySelector('button[type="submit"], input[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = false;
+    const originalText = submitBtn.getAttribute("data-original-text") || "Submit";
+    submitBtn.value = submitBtn.textContent = originalText;
+    if (submitBtn.tagName === "BUTTON") {
+      submitBtn.innerHTML = originalText;
+    }
+  }
+}
+function handleBeforeUnload(event) {
+  if (hasUnsavedChanges && !isSubmitting) {
+    event.preventDefault();
+    event.returnValue = "You have unsaved changes. Are you sure you want to leave?";
+    return "You have unsaved changes. Are you sure you want to leave?";
+  }
+}
+function handleInputChange(event) {
+  const target = event.target;
+  if (target && target.form) {
+    hasUnsavedChanges = true;
+    saveFormData(target.form);
+  }
 }
 function findByLabel(form, keywordList) {
   const labels = form ? Array.from(form.querySelectorAll("label")) : [];
@@ -80,12 +197,54 @@ function pageHeuristics() {
     'meta[property="og:title"], meta[name="title"]'
   );
   const titleCandidate = titleMeta?.getAttribute("content") || document.title || "";
-  const companyEl = document.querySelector(
-    '[data-company-name], [class*="company" i], [class*="employer" i]'
-  );
-  const companyCandidate = normalizedText(
-    companyEl || void 0
-  );
+  let companyCandidate = "";
+  const companyMeta = document.querySelector('meta[property="og:site_name"], meta[name="author"], meta[property="article:author"]');
+  if (companyMeta) {
+    companyCandidate = normalizedText(companyMeta);
+  }
+  if (!companyCandidate) {
+    const headerSelectors = [
+      'header [class*="logo"]',
+      'header [class*="brand"]',
+      'header [class*="company"]',
+      'nav [class*="logo"]',
+      'nav [class*="brand"]',
+      ".logo",
+      ".brand",
+      '[data-test*="logo"]',
+      '[data-test*="brand"]',
+      '[class*="header"] [class*="company"]',
+      '[class*="navbar"] [class*="company"]'
+    ];
+    for (const selector of headerSelectors) {
+      const element = document.querySelector(selector);
+      if (element) {
+        const text = normalizedText(element);
+        if (text && text.length > 0 && text.length < 50) {
+          companyCandidate = text;
+          break;
+        }
+      }
+    }
+  }
+  if (!companyCandidate) {
+    const companyEl = document.querySelector(
+      '[data-company-name], [class*="company" i], [class*="employer" i]'
+    );
+    companyCandidate = normalizedText(companyEl || void 0);
+  }
+  if (!companyCandidate) {
+    const hostname = window.location.hostname;
+    if (hostname && !hostname.includes("localhost") && !hostname.includes("127.0.0.1")) {
+      const domainParts = hostname.split(".");
+      if (domainParts.length >= 2) {
+        const companyFromDomain = domainParts[domainParts.length - 2];
+        if (companyFromDomain && companyFromDomain.length > 2) {
+          companyCandidate = companyFromDomain.charAt(0).toUpperCase() + companyFromDomain.slice(1);
+        }
+      }
+    }
+  }
   const locationEl = document.querySelector(
     '[class*="location" i], [data-test*="location" i]'
   );
@@ -202,8 +361,14 @@ function isLikelyJobApplication(form) {
   const strongSignalCount = signals.filter(Boolean).length;
   return strongSignalCount >= 2 && !hasPassword;
 }
+function formatUsDate(d) {
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const yyyy = d.getFullYear();
+  return `${mm}/${dd}/${yyyy}`;
+}
 function extractJobData(form) {
-  const nowIso = (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const nowUs = formatUsDate(/* @__PURE__ */ new Date());
   const url = location.href;
   const companyKeywords = [
     "company",
@@ -253,7 +418,7 @@ function extractJobData(form) {
     location: byAttr.location || heur.location || "",
     title: byAttr.title || heur.title || "",
     workMode: byAttr.workMode || heur.workMode || "",
-    applicationDate: nowIso,
+    applicationDate: nowUs,
     url,
     resume
   };
@@ -275,12 +440,34 @@ async function sendSubmission(data) {
 function handleSubmitEvent(e) {
   const now = Date.now();
   if (now - jtLastSubmitAt < JT_DEBOUNCE_MS) return;
-  jtLastSubmitAt = now;
   const form = e.target instanceof HTMLFormElement ? e.target : null;
-  if (!isLikelyJobApplication(form)) return;
-  const data = extractJobData(form || document);
-  setTimeout(() => {
-    void sendSubmission(data);
+  if (!form || !isLikelyJobApplication(form)) return;
+  if (isSubmitting) {
+    e.preventDefault();
+    return;
+  }
+  if (e.type !== "submit") {
+    return;
+  }
+  jtLastSubmitAt = now;
+  isSubmitting = true;
+  addLoadingState(form);
+  stopAutoSave();
+  const data = extractJobData(form);
+  setTimeout(async () => {
+    try {
+      const result = await sendSubmission(data);
+      if (result?.ok) {
+        clearFormData(form);
+        hasUnsavedChanges = false;
+        console.log("Job Tracker: Form submitted successfully, data cleared");
+      }
+    } catch (error) {
+      console.warn("Job Tracker: Submission failed:", error);
+    } finally {
+      isSubmitting = false;
+      removeLoadingState(form);
+    }
   }, 10);
 }
 function handleClickEvent(e) {
@@ -296,23 +483,65 @@ function handleClickEvent(e) {
     "submit application"
   ])) {
     const form = el.closest("form");
-    if (isLikelyJobApplication(form || document)) {
-      handleSubmitEvent({
-        target: form || document
-      });
+    if (form && (el.type === "submit" || el.getAttribute("type") === "submit")) {
+      return;
     }
+    console.log("Job Tracker: Apply button clicked, but waiting for actual form submission");
+    return;
   }
 }
+function initializeFormProtection() {
+  window.addEventListener("beforeunload", handleBeforeUnload);
+  document.addEventListener("input", handleInputChange, true);
+  document.addEventListener("change", handleInputChange, true);
+  const forms = document.querySelectorAll("form");
+  forms.forEach((formEl) => {
+    const form = formEl;
+    if (isLikelyJobApplication(form)) {
+      restoreFormData(form);
+      startAutoSave(form);
+      if (!boundForms.has(form)) {
+        form.addEventListener("submit", handleSubmitEvent, true);
+        boundForms.add(form);
+      }
+    }
+  });
+  const observer = new MutationObserver((mutations) => {
+    mutations.forEach((mutation) => {
+      mutation.addedNodes.forEach((node) => {
+        if (node.nodeType === Node.ELEMENT_NODE) {
+          const element = node;
+          const newForms = element.matches("form") ? [element] : Array.from(element.querySelectorAll("form"));
+          newForms.forEach((f) => {
+            const form = f;
+            if (isLikelyJobApplication(form)) {
+              restoreFormData(form);
+              startAutoSave(form);
+              if (!boundForms.has(form)) {
+                form.addEventListener("submit", handleSubmitEvent, true);
+                boundForms.add(form);
+              }
+            }
+          });
+        }
+      });
+    });
+  });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
 function initListeners() {
-  document.addEventListener(
-    "submit",
-    handleSubmitEvent,
-    true
-  );
+  initializeFormProtection();
   document.addEventListener(
     "click",
     handleClickEvent,
     true
   );
 }
+window.addEventListener("unload", () => {
+  stopAutoSave();
+  window.removeEventListener("beforeunload", handleBeforeUnload);
+});
 initListeners();
